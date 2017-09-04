@@ -14,13 +14,12 @@ rnd_save_suffix = np.random.randint(10000)
 
 par = {
     # Setup parameters
-    'save_dir'              : 'C:/Users/nicol/Projects/RNN STP Analysis/',
+    'save_dir'              : './savedir/',
     'debug_model'           : False,
     'load_previous_model'   : False,
     'analyze_model'         : False,
 
     # Network configuration
-    'synapse_config'        : None, # Full is 'std_stf'
     'exc_inh_prop'          : 0.8,       # Literature 0.8, for EI off 1
     'var_delay'             : False,
     'catch_trials'          : False,     # Note that turning on var_delay implies catch_trials
@@ -292,50 +291,6 @@ def update_dependencies():
         par['w_out0'][:, par['ind_inh']] = 0
         par['w_out_mask'][:, par['ind_inh']] = 0
 
-    """
-    Setting up synaptic parameters
-    0 = static
-    1 = facilitating
-    2 = depressing
-    """
-    par['synapse_type'] = np.zeros(par['n_hidden'], dtype=np.int8)
-
-    # only facilitating synapses
-    if par['synapse_config'] == 'stf':
-        par['synapse_type'] = np.ones(par['n_hidden'], dtype=np.int8)
-
-    # only depressing synapses
-    elif par['synapse_config'] == 'std':
-        par['synapse_type'] = 2*np.ones(par['n_hidden'], dtype=np.int8)
-
-    # even numbers facilitating, odd numbers depressing
-    elif par['synapse_config'] == 'std_stf':
-        par['synapse_type'] = np.ones(par['n_hidden'], dtype=np.int8)
-        par['ind'] = range(1,par['n_hidden'],2)
-        par['synapse_type'][par['ind']] = 2
-
-    par['alpha_stf'] = np.ones((par['n_hidden'], 1), dtype=np.float32)
-    par['alpha_std'] = np.ones((par['n_hidden'], 1), dtype=np.float32)
-    par['U'] = np.ones((par['n_hidden'], 1), dtype=np.float32)
-
-    # initial synaptic values
-    par['syn_x_init'] = np.zeros((par['n_hidden'], par['batch_train_size']), dtype=np.float32)
-    par['syn_u_init'] = np.zeros((par['n_hidden'], par['batch_train_size']), dtype=np.float32)
-
-    for i in range(par['n_hidden']):
-        if par['synapse_type'][i] == 1:
-            par['alpha_stf'][i,0] = par['dt']/par['tau_slow']
-            par['alpha_std'][i,0] = par['dt']/par['tau_fast']
-            par['U'][i,0] = 0.15
-            par['syn_x_init'][i,:] = 1
-            par['syn_u_init'][i,:] = par['U'][i,0]
-
-        elif par['synapse_type'][i] == 2:
-            par['alpha_stf'][i,0] = par['dt']/par['tau_fast']
-            par['alpha_std'][i,0] = par['dt']/par['tau_slow']
-            par['U'][i,0] = 0.45
-            par['syn_x_init'][i,:] = 1
-            par['syn_u_init'][i,:] = par['U'][i,0]
 
 def initialize(dims, connection_prob):
     w = np.random.gamma(shape=0.25, scale=1.0, size=dims)

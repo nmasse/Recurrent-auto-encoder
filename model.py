@@ -32,10 +32,6 @@ class Model:
         # Load the initial hidden state activity to be used at the start of each trial
         self.hidden_init = tf.constant(par['h_init'])
 
-        # Load the initial synaptic depression and facilitation to be used at the start of each trial
-        self.synapse_x_init = tf.constant(par['syn_x_init'])
-        self.synapse_u_init = tf.constant(par['syn_u_init'])
-
         # Build the TensorFlow graph
         self.run_model()
 
@@ -49,7 +45,7 @@ class Model:
         Run the reccurent network
         History of hidden state activity stored in self.hidden_state_hist
         """
-        self.rnn_cell_loop(self.input_data, self.hidden_init, self.synapse_x_init, self.synapse_u_init)
+        self.rnn_cell_loop(self.input_data, self.hidden_init)
 
         with tf.variable_scope('output'):
             W_out = tf.get_variable('W_out', initializer = par['w_out0'], trainable=True)
@@ -62,7 +58,7 @@ class Model:
         self.y_hat = [tf.matmul(tf.nn.relu(W_out),h)+b_out for h in self.hidden_state_hist]
 
 
-    def rnn_cell_loop(self, x_unstacked, h, syn_x, syn_u):
+    def rnn_cell_loop(self, x_unstacked, h):
 
         """
         Initialize weights and biases
@@ -74,20 +70,16 @@ class Model:
         self.W_ei = tf.constant(par['EI_matrix'])
 
         self.hidden_state_hist = []
-        self.syn_x_hist = []
-        self.syn_u_hist = []
 
         """
         Loop through the neural inputs to the RNN, indexed in time
         """
         for rnn_input in x_unstacked:
-            h, syn_x, syn_u = self.rnn_cell(rnn_input, h, syn_x, syn_u)
+            h= self.rnn_cell(rnn_input, h, syn_x, syn_u)
             self.hidden_state_hist.append(h)
-            self.syn_x_hist.append(syn_x)
-            self.syn_u_hist.append(syn_u)
 
 
-    def rnn_cell(self, rnn_input, h, syn_x, syn_u):
+    def rnn_cell(self, rnn_input, h):
 
         """
         Main computation of the recurrent network
@@ -104,35 +96,6 @@ class Model:
         else:
             W_rnn_effective = W_rnn
 
-        """
-        Update the synaptic plasticity paramaters
-        """
-        if par['synapse_config'] == 'std_stf':
-            # implement both synaptic short term facilitation and depression
-            syn_x += par['alpha_std']*(1-syn_x) - par['dt_sec']*syn_u*syn_x*h
-            syn_u += par['alpha_stf']*(par['U']-syn_u) + par['dt_sec']*par['U']*(1-syn_u)*h
-            syn_x = tf.minimum(np.float32(1), tf.nn.relu(syn_x))
-            syn_u = tf.minimum(np.float32(1), tf.nn.relu(syn_u))
-            h_post = syn_u*syn_x*h
-
-        elif par['synapse_config'] == 'std':
-            # implement synaptic short term derpression, but no facilitation
-            # we assume that syn_u remains constant at 1
-            syn_x += par['alpha_std']*(1-syn_x) - par['dt_sec']*syn_x*h
-            syn_x = tf.minimum(np.float32(1), tf.nn.relu(syn_x))
-            syn_u = tf.minimum(np.float32(1), tf.nn.relu(syn_u))
-            h_post = syn_x*h
-
-        elif par['synapse_config'] == 'stf':
-            # implement synaptic short term facilitation, but no depression
-            # we assume that syn_x remains constant at 1
-            syn_u += par['alpha_stf']*(par['U']-syn_u) + par['dt_sec']*par['U']*(1-syn_u)*h
-            syn_u = tf.minimum(np.float32(1), tf.nn.relu(syn_u))
-            h_post = syn_u*h
-
-        else:
-            # no synaptic plasticity
-            h_post = h
 
         """
         Update the hidden state
@@ -141,10 +104,10 @@ class Model:
         """
         h = tf.nn.relu(h*(1-par['alpha_neuron'])
                        + par['alpha_neuron']*(tf.matmul(tf.nn.relu(W_in), tf.nn.relu(rnn_input))
-                       + tf.matmul(W_rnn_effective, h_post) + b_rnn)
+                       + tf.matmul(W_rnn_effective, h) + b_rnn)
                        + tf.random_normal([par['n_hidden'], par['batch_train_size']], 0, par['noise_rnn'], dtype=tf.float32))
 
-        return h, syn_x, syn_u
+        return h
 
 
     def optimize(self):
@@ -165,48 +128,6 @@ class Model:
 
         # L2 penalty term on hidden state activity to encourage low spike rate solutions
         spike_loss = [par['spike_cost']*tf.reduce_mean(tf.square(h), axis=0) for h in self.hidden_state_hist]
-
-
-        """
-        with tf.variable_scope('rnn_cell', reuse=True):
-            W_rnn = tf.get_variable('W_rnn')
-            W_in = tf.get_variable('W_in')
-        if par['EI']:
-            W_rnn_effective = tf.matmul(tf.nn.relu(W_rnn), self.W_ei)
-        else:
-            W_rnn_effective = W_rnn
-
-        h = tf.stack(self.hidden_state_hist, axis = 1)
-        x = tf.stack(self.input_data, axis = 1)
-        print(x)
-        print(h)
-        print(W_rnn_effective)
-        print(W_in)
-
-        neural_input = tf.reshape(tf.tensordot(W_rnn_effective,h,axes=[[1],[0]]) + \
-            tf.tensordot(W_in,x,axes=[[1],[0]]),[par['n_hidden'],-1])
-
-        self.dend_loss0 = 0.1*tf.reduce_mean(tf.square(tf.reduce_mean(neural_input,axis=1)))
-        """
-
-        # L2 penalty term on hidden state activity to encourage low spike rate solutions
-        #spike_loss = [par['spike_cost']*tf.reduce_mean(tf.square(h), axis=0) for h,x in zip(self.hidden_state_hist, self.input_data)]
-
-        """
-        with tf.variable_scope('output', reuse=True):
-            W_out = tf.get_variable('W_out')
-        self.dend_loss = 0.05*(tf.reduce_mean(tf.nn.relu(W_rnn)) + tf.reduce_mean(tf.nn.relu(W_in)) + tf.reduce_mean(tf.nn.relu(W_out)))
-        """
-
-
-        h = tf.reshape(tf.stack(self.hidden_state_hist, axis = 1),[par['n_hidden'], -1])
-        u, v = tf.nn.moments(h, axes=[1])
-        h -= tf.tile(tf.reshape(u,[par['n_hidden'], 1]), [1,tf.shape(h)[1]])
-        Z = 0.01+tf.sqrt(tf.matmul(tf.reshape(v,[par['n_hidden'], 1]), tf.reshape(v,[1, par['n_hidden']])))
-        corr_sq = tf.abs(tf.matmul(h,tf.transpose(h)))/Z/tf.to_float(tf.shape(h)[1])
-        self.corr_loss = tf.reduce_sum(corr_sq) - tf.reduce_sum(tf.trace(corr_sq))
-        print('corr_sq')
-        print(corr_sq)
 
         self.perf_loss = tf.reduce_mean(tf.stack(perf_loss, axis=0))
         self.spike_loss = tf.reduce_mean(tf.stack(spike_loss, axis=0)) + 0.000001*self.corr_loss
