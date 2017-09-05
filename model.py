@@ -67,8 +67,9 @@ class Model:
         self.latent_mu = tf.matmul(W_mu,self.hidden_state_hist[-1]) + b_mu
         self.latent_sigma = tf.matmul(W_sigma,self.hidden_state_hist[-1]) + b_sigma
 
-        #self.KL_cost = tf.reduce_sum(1 + self.latent_sigma - tf.square(self.latent_mu) - tf.exp(self.latent_sigma))
-        self.KL_cost = tf.reduce_sum(tf.square(self.latent_mu))
+        self.latent_loss = -0.5*tf.reduce_sum(1 + self.latent_sigma - tf.square(self.latent_mu) - tf.exp(self.latent_sigma))
+
+        #self.latent_loss = tf.reduce_sum(tf.square(self.latent_mu))
         """
         sample_latent =  tf.random_normal([par['n_latent'], par['batch_train_size']], \
             self.latent_mu, self.latent_sigma , dtype=tf.float32)
@@ -191,9 +192,16 @@ class Model:
 
         #self.perf_loss = tf.reduce_mean(tf.stack(perf_loss, axis=0))
         #self.spike_loss = tf.reduce_mean(tf.stack(spike_loss, axis=0)) + 0.000001*self.corr_loss
-        self.spike_loss = 0.000001*self.KL_cost
+
+
+        with tf.variable_scope('rnn_cell', reuse=True):
+            W_rnn = tf.get_variable('W_rnn')
+
+        self.wiring_cost = 0.2*tf.reduce_mean(tf.square(tf.nn.relu(W_rnn)))
 
         #self.loss = self.perf_loss + self.spike_loss
+
+        self.spike_loss = 0.00002*self.latent_loss + self.wiring_cost
 
         self.loss = self.perf_loss + self.spike_loss
 
