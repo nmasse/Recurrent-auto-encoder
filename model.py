@@ -7,14 +7,13 @@ import tensorflow as tf
 import numpy as np
 import stimulus
 import time
-import analysis
+import pickle
 from parameters import *
 
 # Ignore "use compiled version of TensorFlow" errors
 os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 print('Using EI Network:\t', par['EI'])
-print('Synaptic configuration:\t', par['synapse_config'], "\n")
 
 """
 Model setup and execution
@@ -47,15 +46,82 @@ class Model:
         """
         self.rnn_cell_loop(self.input_data, self.hidden_init)
 
+        """
         with tf.variable_scope('output'):
             W_out = tf.get_variable('W_out', initializer = par['w_out0'], trainable=True)
             b_out = tf.get_variable('b_out', initializer = par['b_out0'], trainable=True)
+        """
+
+        with tf.variable_scope('latent'):
+            W_mu = tf.get_variable('W_mu', initializer = par['w_mu0'], trainable=True)
+            W_sigma = tf.get_variable('W_sigma', initializer = par['w_sigma0'], trainable=True)
+            b_mu = tf.get_variable('b_mu', initializer = par['b_mu0'], trainable=True)
+            b_sigma = tf.get_variable('b_sigma', initializer = par['b_sigma0'], trainable=True)
 
         """
         Network output
         Only use excitatory projections from the RNN to the output layer
         """
-        self.y_hat = [tf.matmul(tf.nn.relu(W_out),h)+b_out for h in self.hidden_state_hist]
+        #self.y_hat = [tf.matmul(tf.nn.relu(W_out),h)+b_out for h in self.hidden_state_hist]
+
+        self.latent_mu = tf.matmul(W_mu,self.hidden_state_hist[-1]) + b_mu
+        self.latent_sigma = tf.matmul(W_sigma,self.hidden_state_hist[-1]) + b_sigma
+
+        #self.KL_cost = tf.reduce_sum(1 + self.latent_sigma - tf.square(self.latent_mu) - tf.exp(self.latent_sigma))
+        self.KL_cost = tf.reduce_sum(tf.square(self.latent_mu))
+        """
+        sample_latent =  tf.random_normal([par['n_latent'], par['batch_train_size']], \
+            self.latent_mu, self.latent_sigma , dtype=tf.float32)
+        """
+
+        sample_latent = self.latent_mu + tf.exp(self.latent_sigma)*tf.random_normal([par['n_latent'], par['batch_train_size']], \
+            0, 1 , dtype=tf.float32)
+
+        par['layer_dims'] = [par['n_latent'], 50, 100, par['n_input']*par['num_time_steps']]
+
+        latent = sample_latent
+        print('latent 1',latent)
+
+        for n in range(3):
+            with tf.variable_scope('layer' + str(n)):
+                print('\n-- Layer', n, '--')
+
+                # Get layer variables
+                W = tf.get_variable('W', (par['layer_dims'][n+1], par['layer_dims'][n]), \
+                    initializer=tf.random_normal_initializer(0, 0.01))
+                b = tf.get_variable('b', (par['layer_dims'][n+1], 1), initializer=tf.constant_initializer(0))
+
+                latent = tf.nn.relu(tf.matmul(W, latent) + b)
+
+        print('latent 2', latent)
+
+        self.x_hat =  tf.reshape(latent,[par['n_input'], par['num_time_steps'], par['batch_train_size']])
+        print(self.x_hat)
+
+        """
+        Run the reverse reccurent network
+        History of predicted input  activity stored in self.x_hat
+        """
+        #self.rnn_reverse_cell_loop(sample_latent)
+
+    def rnn_reverse_cell_loop(self, latent):
+
+        with tf.variable_scope('decoder'):
+            W_z = tf.get_variable('W_z', initializer = par['w_z0'], trainable=True)
+            W_x = tf.get_variable('W_x', initializer = par['w_x0'], trainable=True)
+            W_dec = tf.get_variable('W_dec', initializer = par['w_dec0'], trainable=True)
+            W_x_out = tf.get_variable('W_x_out', initializer = par['w_out0'], trainable=True)
+            b_dec = tf.get_variable('b_dec', initializer = par['b_dec0'], trainable=True)
+            b_z = tf.get_variable('b_z', initializer = par['b_z0'], trainable=True)
+
+        self.x_hat = []
+
+        ht = tf.nn.relu(tf.matmul(W_z, latent) + b_z)
+
+        for t in range(par['num_time_steps']-1):
+            xt = tf.nn.relu(tf.matmul(W_x_out, ht))
+            ht = tf.nn.relu(tf.matmul(W_dec, ht) + tf.matmul(W_x, xt) + b_dec)
+            self.x_hat.append(xt)
 
 
     def rnn_cell_loop(self, x_unstacked, h):
@@ -69,26 +135,6 @@ class Model:
             b_rnn = tf.get_variable('b_rnn', initializer = par['b_rnn0'], trainable=True)
         self.W_ei = tf.constant(par['EI_matrix'])
 
-        self.hidden_state_hist = []
-
-        """
-        Loop through the neural inputs to the RNN, indexed in time
-        """
-        for rnn_input in x_unstacked:
-            h= self.rnn_cell(rnn_input, h, syn_x, syn_u)
-            self.hidden_state_hist.append(h)
-
-
-    def rnn_cell(self, rnn_input, h):
-
-        """
-        Main computation of the recurrent network
-        """
-        with tf.variable_scope('rnn_cell', reuse=True):
-            W_in = tf.get_variable('W_in')
-            W_rnn = tf.get_variable('W_rnn')
-            b_rnn = tf.get_variable('b_rnn')
-
         if par['EI']:
             # ensure excitatory neurons only have postive outgoing weights,
             # and inhibitory neurons have negative outgoing weights
@@ -96,18 +142,24 @@ class Model:
         else:
             W_rnn_effective = W_rnn
 
+        self.hidden_state_hist = []
 
         """
-        Update the hidden state
-        Only use excitatory projections from input layer to RNN
-        All input and RNN activity will be non-negative
+        Loop through the neural inputs to the RNN, indexed in time
         """
-        h = tf.nn.relu(h*(1-par['alpha_neuron'])
-                       + par['alpha_neuron']*(tf.matmul(tf.nn.relu(W_in), tf.nn.relu(rnn_input))
-                       + tf.matmul(W_rnn_effective, h) + b_rnn)
-                       + tf.random_normal([par['n_hidden'], par['batch_train_size']], 0, par['noise_rnn'], dtype=tf.float32))
+        for rnn_input in x_unstacked:
 
-        return h
+            """
+            Update the hidden state
+            Only use excitatory projections from input layer to RNN
+            All input and RNN activity will be non-negative
+            """
+            h = tf.nn.relu(h*(1-par['alpha_neuron'])
+                           + par['alpha_neuron']*(tf.matmul(tf.nn.relu(W_in), tf.nn.relu(rnn_input))
+                           + tf.matmul(W_rnn_effective, h) + b_rnn)
+                           + tf.random_normal([par['n_hidden'], par['batch_train_size']], 0, par['noise_rnn'], dtype=tf.float32))
+
+            self.hidden_state_hist.append(h)
 
 
     def optimize(self):
@@ -120,18 +172,28 @@ class Model:
         """
         """
         cross_entropy
-        """
+
 
         perf_loss = [mask*tf.nn.softmax_cross_entropy_with_logits(logits = y_hat, labels = desired_output, dim=0) \
                 for (y_hat, desired_output, mask) in zip(self.y_hat, self.target_data, self.mask)]
+        """
 
+        #self.perf_loss = [tf.reduce_mean(tf.square(x_actual-x_pred)) for x_actual, x_pred in zip(self.input_data, self.x_hat)]
+
+        input_data = tf.stack(self.input_data, axis=1)
+        self.perf_loss = tf.reduce_mean(tf.square(self.x_hat - input_data))
+
+        #self.perf_loss = [tf.reduce_mean(tf.square(self.input_data[i]-self.x_hat[-1-i])) for i in range(len(self.input_data)-1)]
+        #self.perf_loss = tf.reduce_mean(self.perf_loss)
 
         # L2 penalty term on hidden state activity to encourage low spike rate solutions
-        spike_loss = [par['spike_cost']*tf.reduce_mean(tf.square(h), axis=0) for h in self.hidden_state_hist]
+        #spike_loss = [par['spike_cost']*tf.reduce_mean(tf.square(h), axis=0) for h in self.hidden_state_hist]
 
-        self.perf_loss = tf.reduce_mean(tf.stack(perf_loss, axis=0))
-        self.spike_loss = tf.reduce_mean(tf.stack(spike_loss, axis=0)) + 0.000001*self.corr_loss
+        #self.perf_loss = tf.reduce_mean(tf.stack(perf_loss, axis=0))
+        #self.spike_loss = tf.reduce_mean(tf.stack(spike_loss, axis=0)) + 0.000001*self.corr_loss
+        self.spike_loss = 0.000001*self.KL_cost
 
+        #self.loss = self.perf_loss + self.spike_loss
 
         self.loss = self.perf_loss + self.spike_loss
 
@@ -248,31 +310,47 @@ def main():
                 if learning rate = 0, then skip optimizer
                 """
                 if par['learning_rate']>0:
-                    _, loss[j], perf_loss[j], spike_loss[j], y_hat, state_hist, syn_x_hist, syn_u_hist = \
-                        sess.run([model.train_op, model.loss, model.perf_loss, model.spike_loss, model.y_hat, \
-                        model.hidden_state_hist, model.syn_x_hist, model.syn_u_hist], {x: input_data, y: target_data, mask: train_mask})
+                    _, loss[j], perf_loss[j], spike_loss[j], x_hat, state_hist, latent_mu = \
+                        sess.run([model.train_op, model.loss, model.perf_loss, model.spike_loss, model.x_hat, \
+                        model.hidden_state_hist, model.latent_mu], {x: input_data, y: target_data, mask: train_mask})
                 else:
-                    loss[j], perf_loss[j], spike_loss[j], y_hat, state_hist, syn_x_hist, syn_u_hist = \
-                        sess.run([model.loss, model.perf_loss, model.spike_loss, model.y_hat, model.hidden_state_hist, model.syn_x_hist, model.syn_u_hist], {x: input_data, y: target_data, mask: train_mask})
+                    loss[j], perf_loss[j], spike_loss[j], x_hat, state_hist, latent_mu = \
+                        sess.run([model.loss, model.perf_loss, model.spike_loss, model.x_hat, model.hidden_state_hist, model.latent_mu], \
+                        {x: input_data, y: target_data, mask: train_mask})
 
-                accuracy[j] = analysis.get_perf(target_data, y_hat, train_mask)
+                #accuracy[j] = analysis.get_perf(target_data, x_hat, train_mask)
+
+            """
+            x1 = np.stack(x_hat, axis=1)
+            print('mean x ', np.mean(x1))
+            print('mean latent mu ', np.mean(latent_mu))
+            print('mean last state ', np.mean(state_hist[-10]))
+            """
 
             iteration_time = time.time() - t_start
-            model_performance = append_model_performance(model_performance, accuracy, loss, perf_loss, spike_loss, dend_loss, (i+1)*N, iteration_time)
+            #model_performance = append_model_performance(model_performance, accuracy, loss, perf_loss, spike_loss, dend_loss, (i+1)*N, iteration_time)
 
             """
             Save the network model and output model performance to screen
             """
             if (i+1)%par['iters_between_outputs']==0 or i+1==par['num_iterations']:
+                with tf.variable_scope('rnn_cell', reuse=True):
+                    W_rnn = tf.get_variable('W_rnn')
+                results = {'input_data': input_data, 'x_hat':x_hat, 'W_rnn': W_rnn.eval()}
+                save_fn = par['save_dir'] + par['save_fn']
+                pickle.dump(results, open(save_fn, 'wb') )
                 print_results(i, N, iteration_time, perf_loss, spike_loss, dend_loss, state_hist, accuracy)
-                save_path = saver.save(sess, par['save_dir'] + par['ckpt_save_fn'])
+                #save_path = saver.save(sess, par['save_dir'] + par['ckpt_save_fn'])
 
         """
         Analyze the network model and save the results
         """
         if par['analyze_model']:
-            weights = eval_weights()
-            analysis.analyze_model(trial_info, y_hat, state_hist, syn_x_hist, syn_u_hist, model_performance, weights)
+            results = {'input_data': input_data, 'x_hat':x_hat}
+            save_fn = par['save_dir'] + par['save_fn']
+            pickle.dump(results, open(save_fn, 'wb') )
+            #weights = eval_weights()
+            #analysis.analyze_model(trial_info, y_hat, state_hist, syn_x_hist, syn_u_hist, model_performance, weights)
 
 def append_model_performance(model_performance, accuracy, loss, perf_loss, dend_loss, spike_loss, trial_num, iteration_time):
 
