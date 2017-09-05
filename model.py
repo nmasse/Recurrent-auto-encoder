@@ -8,6 +8,7 @@ import numpy as np
 import stimulus
 import time
 import pickle
+import analysis
 from parameters import *
 
 # Ignore "use compiled version of TensorFlow" errors
@@ -46,11 +47,11 @@ class Model:
         """
         self.rnn_cell_loop(self.input_data, self.hidden_init)
 
-        """
+
         with tf.variable_scope('output'):
-            W_out = tf.get_variable('W_out', initializer = par['w_out0'], trainable=True)
-            b_out = tf.get_variable('b_out', initializer = par['b_out0'], trainable=True)
-        """
+            W_out = tf.get_variable('W_out', initializer = par['w_out0'], trainable=False)
+            b_out = tf.get_variable('b_out', initializer = par['b_out0'], trainable=False)
+
 
         with tf.variable_scope('latent'):
             W_mu = tf.get_variable('W_mu', initializer = par['w_mu0'], trainable=True)
@@ -62,7 +63,7 @@ class Model:
         Network output
         Only use excitatory projections from the RNN to the output layer
         """
-        #self.y_hat = [tf.matmul(tf.nn.relu(W_out),h)+b_out for h in self.hidden_state_hist]
+        self.y_hat = [tf.matmul(tf.nn.relu(W_out),h)+b_out for h in self.hidden_state_hist]
 
         self.latent_mu = tf.matmul(W_mu,self.hidden_state_hist[-1]) + b_mu
         self.latent_sigma = tf.matmul(W_sigma,self.hidden_state_hist[-1]) + b_sigma
@@ -75,14 +76,11 @@ class Model:
             self.latent_mu, self.latent_sigma , dtype=tf.float32)
         """
 
-        sample_latent = self.latent_mu + tf.exp(self.latent_sigma)*tf.random_normal([par['n_latent'], par['batch_train_size']], \
+        self.sample_latent = self.latent_mu + tf.exp(self.latent_sigma)*tf.random_normal([par['n_latent'], par['batch_train_size']], \
             0, 1 , dtype=tf.float32)
 
-        par['layer_dims'] = [par['n_latent'], 50, 100, par['n_input']*par['num_time_steps']]
 
-        latent = sample_latent
-        print('latent 1',latent)
-
+        latent = self.sample_latent
         for n in range(3):
             with tf.variable_scope('layer' + str(n)):
                 print('\n-- Layer', n, '--')
@@ -94,10 +92,9 @@ class Model:
 
                 latent = tf.nn.relu(tf.matmul(W, latent) + b)
 
-        print('latent 2', latent)
 
         self.x_hat =  tf.reshape(latent,[par['n_input'], par['num_time_steps'], par['batch_train_size']])
-        print(self.x_hat)
+
 
         """
         Run the reverse reccurent network
@@ -318,12 +315,13 @@ def main():
                 if learning rate = 0, then skip optimizer
                 """
                 if par['learning_rate']>0:
-                    _, loss[j], perf_loss[j], spike_loss[j], x_hat, state_hist, latent_mu = \
-                        sess.run([model.train_op, model.loss, model.perf_loss, model.spike_loss, model.x_hat, \
-                        model.hidden_state_hist, model.latent_mu], {x: input_data, y: target_data, mask: train_mask})
+                    _, loss[j], perf_loss[j], spike_loss[j], x_hat, y_hat, state_hist, latent = \
+                        sess.run([model.train_op, model.loss, model.perf_loss, model.spike_loss, model.x_hat, model.y_hat, \
+                        model.hidden_state_hist, model.sample_latent], {x: input_data, y: target_data, mask: train_mask})
                 else:
-                    loss[j], perf_loss[j], spike_loss[j], x_hat, state_hist, latent_mu = \
-                        sess.run([model.loss, model.perf_loss, model.spike_loss, model.x_hat, model.hidden_state_hist, model.latent_mu], \
+                    loss[j], perf_loss[j], spike_loss[j], x_hat, y_hat, state_hist, latent = \
+                        sess.run([model.loss, model.perf_loss, model.spike_loss, model.x_hat, model.y_hat, \
+                        model.hidden_state_hist, model.sample_latent], \
                         {x: input_data, y: target_data, mask: train_mask})
 
                 #accuracy[j] = analysis.get_perf(target_data, x_hat, train_mask)
@@ -343,14 +341,15 @@ def main():
             """
             if (i+1)%par['iters_between_outputs']==0 or i+1==par['num_iterations']:
                 print_results(i, N, iteration_time, perf_loss, spike_loss, dend_loss, state_hist, accuracy)
-                #save_path = saver.save(sess, par['save_dir'] + par['ckpt_save_fn'])
+                save_path = saver.save(sess, par['save_dir'] + par['ckpt_save_fn'])
 
         """
         Analyze the network model and save the results
         """
         if par['analyze_model']:
             weights = eval_weights()
-            analysis.analyze_model(trial_info, y_hat, x_hat, state_hist, syn_x_hist, syn_u_hist, model_performance, weights)
+            analysis.analyze_model(trial_info, y_hat, x_hat, latent, state_hist, model_performance, weights)
+
 
 def append_model_performance(model_performance, accuracy, loss, perf_loss, dend_loss, spike_loss, trial_num, iteration_time):
 

@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import os
+import analysis
 import matplotlib.pyplot as plt
 
 print("--> Loading parameters...")
@@ -63,8 +64,8 @@ par = {
     # Training specs
     'batch_train_size'      : 128,
     'num_batches'           : 1,
-    'num_iterations'        : 200000,
-    'iters_between_outputs' : 500,
+    'num_iterations'        : 200,
+    'iters_between_outputs' : 100,
 
     # Task specs
     'trial_type'            : 'DMS', # allowable types: DMS, DMRS45, DMRS90, DMRS180, DMC, DMS+DMRS, ABBA, ABCA, dualDMS
@@ -248,6 +249,8 @@ def update_dependencies():
         par['trial_length'] = par['dead_time']+par['fix_time']+par['sample_time']+par['delay_time']+par['test_time']
     # Length of each trial in time steps
     par['num_time_steps'] = par['trial_length']//par['dt']
+
+    par['layer_dims'] = [par['n_latent'], 50, 100, par['n_input']*par['num_time_steps']]
 
 
     ####################################################################

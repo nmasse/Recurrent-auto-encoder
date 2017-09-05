@@ -8,15 +8,13 @@ from sklearn import svm
 import time
 import pickle
 
-def analyze_model(trial_info, y_hat, h, syn_x, syn_u, model_performance, weights):
+def analyze_model(trial_info, y_hat, x_hat, latent, h, model_performance, weights):
 
     """
     Converts neuronal and synaptic values, stored in lists, into 3D arrays
     Creating new variable since h, syn_x, and syn_u are class members of model.py,
     and will get mofiied by functions within analysis.py
     """
-    syn_x_stacked = np.stack(syn_x, axis=1)
-    syn_u_stacked = np.stack(syn_u, axis=1)
     h_stacked = np.stack(h, axis=1)
     trial_time = np.arange(0,h_stacked.shape[1]*par['dt'], par['dt'])
     num_reps = 3
@@ -25,8 +23,10 @@ def analyze_model(trial_info, y_hat, h, syn_x, syn_u, model_performance, weights
     Calculate the neuronal and synaptic contributions towards solving the task
     """
     print('simulating network...')
+    """
     accuracy, accuracy_neural_shuffled, accuracy_syn_shuffled = \
         simulate_network(trial_info, h_stacked, syn_x_stacked, syn_u_stacked, weights, num_reps = num_reps)
+    """
 
     print('lesioning weights...')
     """
@@ -49,11 +49,24 @@ def analyze_model(trial_info, y_hat, h, syn_x, syn_u, model_performance, weights
     using support vector machhines
     """
     print('decoding activity...')
+    """
     neuronal_decoding, synaptic_decoding = calculate_svms(h_stacked, syn_x_stacked, \
         syn_u_stacked, trial_info, trial_time, num_reps = num_reps)
+    """
 
     """
     Save the results
+    """
+    results = {
+        'y_hat'         : y_hat,
+        'x_hat'         : x_hat,
+        'latent'        : latent,
+        'weights'       : weights,
+        'trial_info'    : trial_info,
+        'trial_time'    : trial_time,
+        'parameters'    : par,
+    }
+
     """
     results = {
         'neuronal_decoding': neuronal_decoding,
@@ -75,6 +88,7 @@ def analyze_model(trial_info, y_hat, h, syn_x, syn_u, model_performance, weights
         'accuracy_rnn_start': accuracy_rnn_start,
         'accuracy_rnn_test': accuracy_rnn_test,
         'accuracy_out': accuracy_out}
+    """
 
     save_fn = par['save_dir'] + par['save_fn']
     pickle.dump(results, open(save_fn, 'wb') )
