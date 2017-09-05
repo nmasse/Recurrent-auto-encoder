@@ -21,7 +21,7 @@ par = {
 
     # Network configuration
     'exc_inh_prop'          : 0.8,       # Literature 0.8, for EI off 1
-    'var_delay'             : False,
+    'var_delay'             : True,
     'catch_trials'          : False,     # Note that turning on var_delay implies catch_trials
 
     # Network shape
@@ -30,10 +30,11 @@ par = {
     'num_rule_tuned'        : 0,
     'n_hidden'              : 200,
     'n_output'              : 3,
+    'n_latent'              : 6,
 
     # Timings and rates
     'dt'                    : 20,
-    'learning_rate'         : 5e-3,
+    'learning_rate'         : 1e-3,
     'membrane_time_constant': 100,
     'connection_prob'       : 1,         # Usually 1
 
@@ -41,12 +42,12 @@ par = {
     'clip_max_grad_val'     : 0.25,
     'input_mean'            : 0.0,
     'noise_in_sd'           : 0.01,
-    'noise_rnn_sd'          : 0.5,
+    'noise_rnn_sd'          : 0.05,
 
     # Tuning function data
     'num_motion_dirs'       : 8,
-    'tuning_height'         : 2,        # magnitutde scaling factor for von Mises
-    'kappa'                 : 2,        # concentration scaling factor for von Mises
+    'tuning_height'         : 1,        # magnitutde scaling factor for von Mises
+    'kappa'                 : 1,        # concentration scaling factor for von Mises
 
     # Cost parameters
     'spike_cost'            : 0.00000001,
@@ -59,9 +60,9 @@ par = {
 
     # Training specs
     'batch_train_size'      : 128,
-    'num_batches'           : 8,
-    'num_iterations'        : 400,
-    'iters_between_outputs' : 20,
+    'num_batches'           : 1,
+    'num_iterations'        : 20000,
+    'iters_between_outputs' : 1000,
 
     # Task specs
     'trial_type'            : 'DMS', # allowable types: DMS, DMRS45, DMRS90, DMRS180, DMC, DMS+DMRS, ABBA, ABCA, dualDMS
@@ -271,15 +272,14 @@ def update_dependencies():
             par['w_rnn0'][i,i] = 0
         par['w_rnn_mask'] = np.ones((par['hidden_to_hidden_dims']), dtype=np.float32) - np.eye(par['n_hidden'])
     else:
-        par['w_rnn0'] = np.eye(par['n_hidden'])
+        par['w_rnn0'] = np.eye(par['n_hidden'], dtype=np.float32)
         par['w_rnn_mask'] = np.ones((par['hidden_to_hidden_dims']), dtype=np.float32)
 
     par['b_rnn0'] = np.zeros((par['n_hidden'], 1), dtype=np.float32)
 
     # Effective synaptic weights are stronger when no short-term synaptic plasticity
     # is used, so the strength of the recurrent weights is reduced to compensate
-    if par['synapse_config'] == None:
-        par['w_rnn0'] = par['w_rnn0']/(spectral_radius(par['w_rnn0']))
+    par['w_rnn0'] = par['w_rnn0']/(spectral_radius(par['w_rnn0']))
 
     # Initialize output weights and biases
     par['w_out0'] =initialize([par['n_output'], par['n_hidden']], par['connection_prob'])
@@ -290,6 +290,29 @@ def update_dependencies():
         par['ind_inh'] = np.where(par['EI_list'] == -1)[0]
         par['w_out0'][:, par['ind_inh']] = 0
         par['w_out_mask'][:, par['ind_inh']] = 0
+
+    # encoder model
+    # following VARIATIONAL RECURRENT AUTO-ENCODERS
+    # Fabius et al., 2015
+    Z = 0.01
+
+
+    par['w_mu0'] = Z*initialize([par['n_latent'], par['n_hidden']], par['connection_prob'])
+    par['w_sigma0'] = Z*initialize([par['n_latent'], par['n_hidden']], par['connection_prob'])
+    par['b_mu0'] = np.zeros((par['n_latent'], 1), dtype=np.float32)
+    par['b_sigma0'] = np.zeros((par['n_latent'], 1), dtype=np.float32)
+
+    # decoder model
+    """
+    par['w_z0'] = Z*initialize([par['n_hidden'], par['n_latent']], par['connection_prob'])
+    par['w_x0'] = Z*initialize([par['n_hidden'], par['n_input']], par['connection_prob'])
+    par['w_dec0'] = Z*initialize([par['n_hidden'], par['n_hidden']], par['connection_prob'])
+    par['w_out0'] = Z*initialize([par['n_input'], par['n_hidden']], par['connection_prob'])
+    par['b_z0'] = np.zeros((par['n_hidden'], 1), dtype=np.float32)
+    par['b_dec0'] = np.zeros((par['n_hidden'], 1), dtype=np.float32)
+    """
+
+
 
 
 def initialize(dims, connection_prob):
