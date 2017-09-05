@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import os
+import matplotlib.pyplot as plt
 
 print("--> Loading parameters...")
 
@@ -31,6 +32,7 @@ par = {
     'n_hidden'              : 200,
     'n_output'              : 3,
     'n_latent'              : 6,
+    'topographic_inputs'    : True,
 
     # Timings and rates
     'dt'                    : 20,
@@ -42,10 +44,10 @@ par = {
     'clip_max_grad_val'     : 0.25,
     'input_mean'            : 0.0,
     'noise_in_sd'           : 0.01,
-    'noise_rnn_sd'          : 0.05,
+    'noise_rnn_sd'          : 0.2,
 
     # Tuning function data
-    'num_motion_dirs'       : 8,
+    'num_motion_dirs'       : 12,
     'tuning_height'         : 1,        # magnitutde scaling factor for von Mises
     'kappa'                 : 1,        # concentration scaling factor for von Mises
 
@@ -61,8 +63,8 @@ par = {
     # Training specs
     'batch_train_size'      : 128,
     'num_batches'           : 1,
-    'num_iterations'        : 20000,
-    'iters_between_outputs' : 1000,
+    'num_iterations'        : 200000,
+    'iters_between_outputs' : 500,
 
     # Task specs
     'trial_type'            : 'DMS', # allowable types: DMS, DMRS45, DMRS90, DMRS180, DMC, DMS+DMRS, ABBA, ABCA, dualDMS
@@ -259,7 +261,10 @@ def update_dependencies():
 
 
     # Initialize input weights
-    par['w_in0'] = initialize(par['input_to_hidden_dims'], par['connection_prob'])
+    if par['topographic_inputs']:
+        par['w_in0'] = organize_inputs()
+    else:
+        par['w_in0'] = initialize(par['input_to_hidden_dims'], par['connection_prob'])
 
     # Initialize starting recurrent weights
     # If excitatory/inhibitory neurons desired, initializes with random matrix with
@@ -312,6 +317,27 @@ def update_dependencies():
     par['b_dec0'] = np.zeros((par['n_hidden'], 1), dtype=np.float32)
     """
 
+def organize_inputs():
+
+    par['w_in0'] = np.zeros((par['n_hidden'], par['n_input']), dtype = np.float32)
+
+    ring_exc = np.exp(1j*2*np.pi*np.arange(par['num_exc_units'])/par['num_exc_units'])
+    ring_inh = np.exp(1j*2*np.pi*np.arange(par['num_inh_units'])/par['num_inh_units'])
+    ring_input = np.exp(1j*2*np.pi*np.arange(par['n_input'])/par['n_input'])
+
+    for i in range(par['n_input']):
+        for j in range(par['num_exc_units']):
+            if np.random.rand() < ring_exc[j]*np.conj(ring_input[i]):
+                par['w_in0'][j,i] = np.random.gamma(shape=0.25, scale=1.0)
+        for j in range(par['num_inh_units']):
+            if np.random.rand() < ring_inh[j]*np.conj(ring_input[i]):
+                par['w_in0'][par['num_exc_units']+j,i] = np.random.gamma(shape=0.25, scale=1.0)
+
+    #plt.imshow(par['w_in0'], aspect = 'auto', interpolation = 'none')
+    #plt.show()
+
+
+    return par['w_in0']
 
 
 
