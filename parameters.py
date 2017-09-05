@@ -31,7 +31,7 @@ par = {
     'num_rule_tuned'        : 0,
     'n_hidden'              : 200,
     'n_output'              : 3,
-    'n_latent'              : 6,
+    'n_latent'              : 5,
     'topographic_inputs'    : True,
 
     # Timings and rates

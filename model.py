@@ -342,11 +342,6 @@ def main():
             Save the network model and output model performance to screen
             """
             if (i+1)%par['iters_between_outputs']==0 or i+1==par['num_iterations']:
-                with tf.variable_scope('rnn_cell', reuse=True):
-                    W_rnn = tf.get_variable('W_rnn')
-                results = {'input_data': input_data, 'x_hat':x_hat, 'W_rnn': W_rnn.eval()}
-                save_fn = par['save_dir'] + par['save_fn']
-                pickle.dump(results, open(save_fn, 'wb') )
                 print_results(i, N, iteration_time, perf_loss, spike_loss, dend_loss, state_hist, accuracy)
                 #save_path = saver.save(sess, par['save_dir'] + par['ckpt_save_fn'])
 
@@ -354,11 +349,8 @@ def main():
         Analyze the network model and save the results
         """
         if par['analyze_model']:
-            results = {'input_data': input_data, 'x_hat':x_hat}
-            save_fn = par['save_dir'] + par['save_fn']
-            pickle.dump(results, open(save_fn, 'wb') )
-            #weights = eval_weights()
-            #analysis.analyze_model(trial_info, y_hat, state_hist, syn_x_hist, syn_u_hist, model_performance, weights)
+            weights = eval_weights()
+            analysis.analyze_model(trial_info, y_hat, x_hat, state_hist, syn_x_hist, syn_u_hist, model_performance, weights)
 
 def append_model_performance(model_performance, accuracy, loss, perf_loss, dend_loss, spike_loss, trial_num, iteration_time):
 
