@@ -3,12 +3,13 @@ Functions used to save model data and to perform analysis
 """
 
 import numpy as np
-from parameters import *
 from sklearn import svm
 import time
 import pickle
+from parameters import par
 
 def analyze_model(trial_info, y_hat, x_hat, latent, h, model_performance, weights):
+
 
     """
     Converts neuronal and synaptic values, stored in lists, into 3D arrays
@@ -41,9 +42,10 @@ def analyze_model(trial_info, y_hat, x_hat, latent, h, model_performance, weight
     """
 
     print('calculate tuning...')
+    """
     neuronal_pref_dir, neuronal_pev, synaptic_pref_dir, synaptic_pev, neuronal_pev_test, neuronal_pref_dir_test, neuronal_sample_tuning \
         = calculate_tuning(h_stacked, syn_x_stacked, syn_u_stacked, trial_info, trial_time, calculate_test = True)
-
+    """
     """
     Decode the sample direction from neuronal activity and synaptic efficacies
     using support vector machhines
@@ -58,13 +60,14 @@ def analyze_model(trial_info, y_hat, x_hat, latent, h, model_performance, weight
     Save the results
     """
     results = {
-        'y_hat'         : y_hat,
-        'x_hat'         : x_hat,
-        'latent'        : latent,
-        'weights'       : weights,
-        'trial_info'    : trial_info,
-        'trial_time'    : trial_time,
-        'parameters'    : par,
+        'y_hat'             : y_hat,
+        'x_hat'             : x_hat,
+        'latent'            : latent,
+        'weights'           : weights,
+        'trial_info'        : trial_info,
+        'trial_time'        : trial_time,
+        'model_performance' : model_performance,
+        'parameters'        : par
     }
 
     """

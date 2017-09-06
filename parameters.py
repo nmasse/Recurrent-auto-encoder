@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
 import os
-import analysis
 import matplotlib.pyplot as plt
 
 print("--> Loading parameters...")
@@ -25,6 +24,7 @@ par = {
     'exc_inh_prop'          : 0.8,       # Literature 0.8, for EI off 1
     'var_delay'             : True,
     'catch_trials'          : False,     # Note that turning on var_delay implies catch_trials
+    'train_task'            : False,
 
     # Network shape
     'num_motion_tuned'      : 36,
@@ -54,6 +54,8 @@ par = {
 
     # Cost parameters
     'spike_cost'            : 0.00000001,
+    'latent_cost'           : 0.00002,
+    'wiring_cost'           : 0.01,
 
     # Synaptic plasticity specs
     'tau_fast'              : 200,
@@ -64,8 +66,8 @@ par = {
     # Training specs
     'batch_train_size'      : 128,
     'num_batches'           : 1,
-    'num_iterations'        : 200,
-    'iters_between_outputs' : 100,
+    'num_iterations'        : 20000,
+    'iters_between_outputs' : 1000,
 
     # Task specs
     'trial_type'            : 'DMS', # allowable types: DMS, DMRS45, DMRS90, DMRS180, DMC, DMS+DMRS, ABBA, ABCA, dualDMS

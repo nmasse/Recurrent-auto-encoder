@@ -47,10 +47,9 @@ class Model:
         """
         self.rnn_cell_loop(self.input_data, self.hidden_init)
 
-
         with tf.variable_scope('output'):
-            W_out = tf.get_variable('W_out', initializer = par['w_out0'], trainable=False)
-            b_out = tf.get_variable('b_out', initializer = par['b_out0'], trainable=False)
+            W_out = tf.get_variable('W_out', initializer = par['w_out0'], trainable=True)
+            b_out = tf.get_variable('b_out', initializer = par['b_out0'], trainable=True)
 
 
         with tf.variable_scope('latent'):
@@ -170,37 +169,23 @@ class Model:
         """
         """
         cross_entropy
-
-
-        perf_loss = [mask*tf.nn.softmax_cross_entropy_with_logits(logits = y_hat, labels = desired_output, dim=0) \
-                for (y_hat, desired_output, mask) in zip(self.y_hat, self.target_data, self.mask)]
         """
 
-        #self.perf_loss = [tf.reduce_mean(tf.square(x_actual-x_pred)) for x_actual, x_pred in zip(self.input_data, self.x_hat)]
+        self.perf_loss = tf.reduce_mean([mask*tf.nn.softmax_cross_entropy_with_logits(logits = y_hat, labels = desired_output, dim=0) \
+                for (y_hat, desired_output, mask) in zip(self.y_hat, self.target_data, self.mask)])
+
 
         input_data = tf.stack(self.input_data, axis=1)
-        self.perf_loss = tf.reduce_mean(tf.square(self.x_hat - input_data))
-
-        #self.perf_loss = [tf.reduce_mean(tf.square(self.input_data[i]-self.x_hat[-1-i])) for i in range(len(self.input_data)-1)]
-        #self.perf_loss = tf.reduce_mean(self.perf_loss)
-
-        # L2 penalty term on hidden state activity to encourage low spike rate solutions
-        #spike_loss = [par['spike_cost']*tf.reduce_mean(tf.square(h), axis=0) for h in self.hidden_state_hist]
-
-        #self.perf_loss = tf.reduce_mean(tf.stack(perf_loss, axis=0))
-        #self.spike_loss = tf.reduce_mean(tf.stack(spike_loss, axis=0)) + 0.000001*self.corr_loss
-
+        self.recotruction_loss = tf.reduce_mean(tf.square(self.x_hat - input_data))
 
         with tf.variable_scope('rnn_cell', reuse=True):
             W_rnn = tf.get_variable('W_rnn')
 
-        self.wiring_cost = 0.2*tf.reduce_mean(tf.square(tf.nn.relu(W_rnn)))
+        #self.wiring_cost = par['wiring_cost']*tf.reduce_mean(tf.square(tf.nn.relu(W_rnn)))
+        self.spike_loss = par['spike_cost']*tf.reduce_mean([tf.reduce_mean(tf.square(h), axis=0) for h in self.hidden_state_hist])
 
-        #self.loss = self.perf_loss + self.spike_loss
+        self.loss = self.perf_loss + self.recotruction_loss + self.spike_loss
 
-        self.spike_loss = 0.00002*self.latent_loss + self.wiring_cost
-
-        self.loss = self.perf_loss + self.spike_loss
 
         opt = tf.train.AdamOptimizer(learning_rate = par['learning_rate'])
         grads_and_vars = opt.compute_gradients(self.loss)
@@ -213,7 +198,7 @@ class Model:
             if var.name == "rnn_cell/W_rnn:0":
                 grad *= par['w_rnn_mask']
                 print('Applied weight mask to w_rnn.')
-            elif var.name == "output/W_out:0":
+            elif var.name == "output/W_out:0" and par['train_task']:
                 grad *= par['w_out_mask']
                 print('Applied weight mask to w_out.')
             if not str(type(grad)) == "<class 'NoneType'>":
@@ -230,6 +215,10 @@ def train_and_analyze():
     Paramaters used for analysis purposes found in analysis_par.
     """
 
+    main()
+    updates = {'load_previous_model': True, 'train_task': True}
+    update_parameters(updates)
+    tf.reset_default_graph()
     main()
     update_parameters(analysis_par)
     tf.reset_default_graph()
@@ -285,62 +274,53 @@ def main():
             print('Model ' +  par['ckpt_load_fn'] + ' restored.')
 
         # keep track of the model performance across training
-        model_performance = {'accuracy': [], 'loss': [], 'perf_loss': [], 'spike_loss': [], 'dend_loss': [], 'trial': [], 'time': []}
+        model_performance = {'accuracy': [], 'loss': [], 'perf_loss': [], 'spike_loss': [], \
+            'recotruction_loss': [], 'trial': [], 'time': []}
 
         for i in range(par['num_iterations']):
 
             # generate batch of N (batch_train_size X num_batches) trials
             trial_info = stim.generate_trial()
 
-            # keep track of the model performance for this batch
-            loss = np.zeros((par['num_batches']))
-            perf_loss = np.zeros((par['num_batches']))
-            spike_loss = np.zeros((par['num_batches']))
-            dend_loss = np.zeros((par['num_batches']))
-            accuracy = np.zeros((par['num_batches']))
-
-            for j in range(par['num_batches']):
-
-                """
-                Select batches of size batch_train_size
-                """
-                ind = range(j*par['batch_train_size'],(j+1)*par['batch_train_size'])
-                target_data = trial_info['desired_output'][:,:,ind]
-                input_data = trial_info['neural_input'][:,:,ind]
-                train_mask = trial_info['train_mask'][:,ind]
-
-                """
-                Run the model
-                If learning rate > 0, then also run the optimizer;
-                if learning rate = 0, then skip optimizer
-                """
-                if par['learning_rate']>0:
-                    _, loss[j], perf_loss[j], spike_loss[j], x_hat, y_hat, state_hist, latent = \
-                        sess.run([model.train_op, model.loss, model.perf_loss, model.spike_loss, model.x_hat, model.y_hat, \
-                        model.hidden_state_hist, model.sample_latent], {x: input_data, y: target_data, mask: train_mask})
-                else:
-                    loss[j], perf_loss[j], spike_loss[j], x_hat, y_hat, state_hist, latent = \
-                        sess.run([model.loss, model.perf_loss, model.spike_loss, model.x_hat, model.y_hat, \
-                        model.hidden_state_hist, model.sample_latent], \
-                        {x: input_data, y: target_data, mask: train_mask})
-
-                #accuracy[j] = analysis.get_perf(target_data, x_hat, train_mask)
+            """
+            Select batches of size batch_train_size
+            """
+            target_data = trial_info['desired_output']
+            input_data = trial_info['neural_input']
+            train_mask = trial_info['train_mask']
 
             """
-            x1 = np.stack(x_hat, axis=1)
-            print('mean x ', np.mean(x1))
-            print('mean latent mu ', np.mean(latent_mu))
-            print('mean last state ', np.mean(state_hist[-10]))
+            Run the model
+            If learning rate > 0, then also run the optimizer;
+            if learning rate = 0, then skip optimizer
             """
+
+            if not par['train_task']:
+                train_mask *= 0
+
+            if par['learning_rate']>0:
+                _, loss, perf_loss, spike_loss, recotruction_loss, x_hat, y_hat, state_hist, latent = \
+                    sess.run([model.train_op, model.loss, model.perf_loss, model.spike_loss, model.recotruction_loss, \
+                    model.x_hat, model.y_hat, model.hidden_state_hist, model.sample_latent], \
+                    {x: input_data, y: target_data, mask: train_mask})
+            else:
+                loss, perf_loss, spike_loss, recotruction_loss, x_hat, y_hat, state_hist, latent = \
+                    sess.run([model.loss, model.perf_loss, model.spike_loss, model.recotruction_loss, model.x_hat, model.y_hat, \
+                    model.hidden_state_hist, model.sample_latent], \
+                    {x: input_data, y: target_data, mask: train_mask})
+
+            accuracy = analysis.get_perf(target_data, x_hat, train_mask)
+
 
             iteration_time = time.time() - t_start
-            #model_performance = append_model_performance(model_performance, accuracy, loss, perf_loss, spike_loss, dend_loss, (i+1)*N, iteration_time)
+            model_performance = append_model_performance(model_performance, accuracy, loss, perf_loss, spike_loss, \
+                recotruction_loss, (i+1)*N, iteration_time)
 
             """
             Save the network model and output model performance to screen
             """
             if (i+1)%par['iters_between_outputs']==0 or i+1==par['num_iterations']:
-                print_results(i, N, iteration_time, perf_loss, spike_loss, dend_loss, state_hist, accuracy)
+                print_results(i, N, iteration_time, perf_loss, spike_loss, recotruction_loss, state_hist, accuracy)
                 save_path = saver.save(sess, par['save_dir'] + par['ckpt_save_fn'])
 
         """
@@ -351,13 +331,13 @@ def main():
             analysis.analyze_model(trial_info, y_hat, x_hat, latent, state_hist, model_performance, weights)
 
 
-def append_model_performance(model_performance, accuracy, loss, perf_loss, dend_loss, spike_loss, trial_num, iteration_time):
+def append_model_performance(model_performance, accuracy, loss, perf_loss, recotruction_loss, spike_loss, trial_num, iteration_time):
 
-    model_performance['accuracy'].append(np.mean(accuracy))
-    model_performance['loss'].append(np.mean(loss))
-    model_performance['perf_loss'].append(np.mean(perf_loss))
-    model_performance['dend_loss'].append(np.mean(dend_loss))
-    model_performance['spike_loss'].append(np.mean(spike_loss))
+    model_performance['accuracy'].append(accuracy)
+    model_performance['loss'].append(loss)
+    model_performance['perf_loss'].append(perf_loss)
+    model_performance['recotruction_loss'].append(recotruction_loss)
+    model_performance['spike_loss'].append(spike_loss)
     model_performance['trial'].append(trial_num)
     model_performance['time'].append(iteration_time)
 
@@ -374,18 +354,29 @@ def eval_weights():
         W_out = tf.get_variable('W_out')
         b_out = tf.get_variable('b_out')
 
+    with tf.variable_scope('latent', reuse=True):
+        W_mu = tf.get_variable('W_mu')
+        W_sigma = tf.get_variable('W_sigma')
+        b_mu = tf.get_variable('b_mu')
+        b_sigma = tf.get_variable('b_sigma')
+
     weights = {
-        'w_in'  : W_in.eval(),
-        'w_rnn' : W_rnn.eval(),
-        'w_out' : W_out.eval(),
-        'b_rnn' : b_rnn.eval(),
-        'b_out'  : b_out.eval()
+        'w_in'      : W_in.eval(),
+        'w_rnn'     : W_rnn.eval(),
+        'w_out'     : W_out.eval(),
+        'w_mu'      : W_mu.eval(),
+        'w_sigma'   : W_sigma.eval(),
+        'b_mu'      : b_mu.eval(),
+        'b_sigma'   : b_sigma.eval(),
+        'b_rnn'     : b_rnn.eval(),
+        'b_out'     : b_out.eval()
     }
 
     return weights
 
-def print_results(iter_num, trials_per_iter, iteration_time, perf_loss, spike_loss, dend_loss, state_hist, accuracy):
+def print_results(iter_num, trials_per_iter, iteration_time, perf_loss, spike_loss, recotruction_loss, state_hist, accuracy):
 
     print('Trial {:7d}'.format((iter_num+1)*trials_per_iter) + ' | Time {:0.2f} s'.format(iteration_time) +
-      ' | Perf loss {:0.4f}'.format(np.mean(perf_loss)) + ' | Spike loss {:0.4f}'.format(np.mean(spike_loss)) +
-      ' | Dend loss {:0.4f}'.format(np.mean(dend_loss)) + ' | Mean activity {:0.4f}'.format(np.mean(state_hist)) + ' | Accuracy {:0.4f}'.format(np.mean(accuracy)))
+      ' | Perf loss {:0.4f}'.format(perf_loss) + ' | Spike loss {:0.4f}'.format(spike_loss) +
+      ' | Recon. loss {:0.4f}'.format(recotruction_loss) + ' | Mean activity {:0.4f}'.format(np.mean(state_hist)) +
+      ' | Accuracy {:0.4f}'.format(accuracy))
